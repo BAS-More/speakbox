@@ -285,3 +285,22 @@ upstream provider key is the problem, not the router. Note that `openai/*` and
 **Nothing here needs ffmpeg.** It was installed only for the GUI and removed
 with it. The local engine writes no files, and `Read-Aloud.ps1` writes WAV
 directly.
+
+---
+
+## License
+
+Copyright 2026 BAS-More. Licensed under the [Apache License 2.0](LICENSE).
+
+This repository contains only SpeakBox's own code. The speech engines and
+voices it uses are separate downloads under their own licenses:
+
+| Component | License |
+|---|---|
+| [Piper](https://github.com/OHF-Voice/piper1-gpl) (`piper-tts`) and `phonemizer` | GPL-3.0 |
+| [kokoro-onnx](https://github.com/thewh1teagle/kokoro-onnx), ONNX Runtime | MIT |
+| Kokoro-82M model | Apache-2.0 |
+| Piper voices | per voice - see each voice's model card on Hugging Face |
+
+If you redistribute a bundle that includes Piper, that bundle as a whole is
+covered by the GPL-3.0.
