@@ -4,8 +4,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from texts import SHORT, MEDIUM, LONG, STT_TEXT
 from piper import PiperVoice, SynthesisConfig
 
-MODELS = Path(r"C:/Dev/tools/tts/bench/models")
-OUT = Path(r"C:/Dev/tools/tts/bench/out")
+BENCH = Path(__file__).resolve().parents[1]  # the bench/ folder, wherever the repo is
+MODELS = BENCH / "models"
+OUT = BENCH / "out"
 MODEL = MODELS / "en_US-lessac-medium.onnx"
 
 t0 = time.perf_counter()

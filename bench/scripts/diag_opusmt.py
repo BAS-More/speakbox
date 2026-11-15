@@ -4,7 +4,8 @@ os.environ["CT2_FORCE_CPU_ISA"] = os.environ.get("CT2_FORCE_CPU_ISA", "")
 from pathlib import Path
 import ctranslate2, sentencepiece as spm
 print("ct2", ctranslate2.__version__, flush=True)
-MDIR = Path(r"C:/Dev/tools/tts/bench/models/opus-mt-en-de-ct2")
+BENCH = Path(__file__).resolve().parents[1]  # the bench/ folder, wherever the repo is
+MDIR = BENCH / "models/opus-mt-en-de-ct2"
 sp_src = spm.SentencePieceProcessor(model_file=str(MDIR/"source.spm"))
 sp_tgt = spm.SentencePieceProcessor(model_file=str(MDIR/"target.spm"))
 print("spm loaded", flush=True)

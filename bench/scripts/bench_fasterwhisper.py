@@ -2,9 +2,10 @@ import time, json, sys, wave
 from pathlib import Path
 from faster_whisper import WhisperModel
 
-OUT = Path(r"C:/Dev/tools/tts/bench/out")
+BENCH = Path(__file__).resolve().parents[1]  # the bench/ folder, wherever the repo is
+OUT = BENCH / "out"
 SAMPLE = OUT / "stt_sample.wav"
-MODELS_DIR = Path(r"C:/Dev/tools/tts/bench/models/fw")
+MODELS_DIR = BENCH / "models/fw"
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 with wave.open(str(SAMPLE), "rb") as w:

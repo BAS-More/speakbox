@@ -5,8 +5,9 @@ from texts import SHORT, MEDIUM
 import soundfile as sf
 from kokoro_onnx import Kokoro
 
-MODELS = Path(r"C:/Dev/tools/tts/bench/models")
-OUT = Path(r"C:/Dev/tools/tts/bench/out")
+BENCH = Path(__file__).resolve().parents[1]  # the bench/ folder, wherever the repo is
+MODELS = BENCH / "models"
+OUT = BENCH / "out"
 MODEL = MODELS / "kokoro-v1.0.fp32.onnx"
 VOICES = MODELS / "voices-v1.0.bin"
 VOICE = "af_sarah"

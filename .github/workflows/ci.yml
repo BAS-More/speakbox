@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    # No models, audio or Python packages needed: parse + compile + splitter tests.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: PowerShell checks (parse, embedded C#, controls, sentence splitter)
+        shell: pwsh
+        run: ./tests/ci-checks.ps1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Python compile check
+        shell: pwsh
+        run: |
+          $files = @('speakbox_engine.py') + (Get-ChildItem bench/scripts/*.py).FullName
+          python -m py_compile @files
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          "compiled $($files.Count) files"

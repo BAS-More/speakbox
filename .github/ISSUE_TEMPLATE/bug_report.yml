@@ -1,0 +1,32 @@
+name: Bug report
+description: Something in SpeakBox does not work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: voice
+    attributes:
+      label: Voice engine
+      options: [Kokoro, Piper, Windows, Not voice-related]
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Windows and PowerShell version
+      description: "Run: [Environment]::OSVersion.VersionString; $PSVersionTable.PSVersion"
+      placeholder: Windows 11 10.0.26100, PowerShell 7.6.0
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: The last ~20 lines of speakbox.log (and speakbox-engine.log for Kokoro/Piper problems). Remove anything private.
+      render: text

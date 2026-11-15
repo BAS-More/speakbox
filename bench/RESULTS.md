@@ -4,7 +4,7 @@
 **Date:** 2026-09-02 · All local, offline, no CUDA.
 **Metric:** RTF = wall_seconds / audio_seconds (lower is better; <1 = faster than real time). Each config: 3 runs, first discarded (warmup), median reported.
 
-> **Measurement caveat (important):** the box was under heavy background CPU load during the run (total CPU ~97%; Avi's stack of node/MCP servers, hooks, plus an open Task Manager). CPU-bound STT numbers (Leg 3 especially) showed large run-to-run variance and are therefore **conservative** — a quiet box would be faster. Piper (Leg 1) and the OpenVINO device comparison (Leg 5) were stable regardless.
+> **Measurement caveat (important):** the box was under heavy background CPU load during the run (total CPU ~97% from other background services and an open Task Manager). CPU-bound STT numbers (Leg 3 especially) showed large run-to-run variance and are therefore **conservative** — a quiet box would be faster. Piper (Leg 1) and the OpenVINO device comparison (Leg 5) were stable regardless.
 
 ## Summary table
 

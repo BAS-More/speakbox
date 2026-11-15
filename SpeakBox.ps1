@@ -13,11 +13,12 @@
       * Clear                            -> stop and empty the box
 
     Voices:
-      * Kokoro  - neural, best quality (bench\models\kokoro-v1.0.fp32.onnx)
+      * Kokoro  - neural, best quality (models\kokoro-v1.0.onnx + voices-v1.0.bin)
       * Piper   - neural, fastest       (voices\piper\*.onnx)
       * Windows - the built-in System.Speech voices
-    Kokoro and Piper run in speakbox_engine.py (bench\.venv), started on demand
-    and kept warm. Everything is local and offline.
+    Kokoro and Piper run in speakbox_engine.py (Python in .venv), started on
+    demand and kept warm. Everything is local and offline. setup.ps1 installs
+    the Python environment and downloads the models.
 
     Text is read sentence by sentence. Each sentence becomes a WAV file that is
     played through winmm MCI, which is what makes pause and seeking possible.
@@ -26,7 +27,10 @@
 param(
     [bool]   $Top = $true,
     [switch] $SpeakOnCopy,
-    [int]    $MaxChars = 20000
+    [int]    $MaxChars = 20000,
+    # auto = follow the Windows app theme (Settings > Personalisation > Colours)
+    [ValidateSet('auto', 'dark', 'light')]
+    [string] $Theme = 'auto'
 )
 
 Set-StrictMode -Version Latest
@@ -35,11 +39,17 @@ $ErrorActionPreference = 'Stop'
 $script:Root      = Split-Path -Parent $PSCommandPath
 $script:StateFile = Join-Path $script:Root 'speakbox.state.json'
 $script:LogFile   = Join-Path $script:Root 'speakbox.log'
-$script:Python    = Join-Path $script:Root 'bench\.venv\Scripts\python.exe'
+# First match wins. The standard layout comes from setup.ps1; the bench\ paths
+# are the original development layout. speakbox_engine.py uses the same order.
+function Find-First([string[]] $Relative) {
+    foreach ($r in $Relative) { $p = Join-Path $script:Root $r; if (Test-Path -LiteralPath $p) { return $p } }
+    return (Join-Path $script:Root $Relative[0])   # not installed: the standard path, for messages
+}
+$script:Python    = Find-First '.venv\Scripts\python.exe', 'bench\.venv\Scripts\python.exe'
 $script:EngineScript = Join-Path $script:Root 'speakbox_engine.py'
 $script:PiperDir  = Join-Path $script:Root 'voices\piper'
-$script:KokoroModel  = Join-Path $script:Root 'bench\models\kokoro-v1.0.fp32.onnx'
-$script:KokoroVoices = Join-Path $script:Root 'bench\models\voices-v1.0.bin'
+$script:KokoroModel  = Find-First 'models\kokoro-v1.0.onnx', 'models\kokoro-v1.0.fp32.onnx', 'bench\models\kokoro-v1.0.fp32.onnx'
+$script:KokoroVoices = Find-First 'models\voices-v1.0.bin', 'bench\models\voices-v1.0.bin'
 $script:TmpDir    = Join-Path ([IO.Path]::GetTempPath()) 'SpeakBox'
 
 function Write-Log {
@@ -56,10 +66,22 @@ trap {
     break
 }
 
+# How long pwsh itself took to reach this script. A slow start shows up here
+# (at logon the machine is busy), separately from the app's own start-up time.
+try { $script:BootLag = [int]((Get-Date) - (Get-Process -Id $PID).StartTime).TotalSeconds } catch { $script:BootLag = -1 }
+$script:BootClock = [Diagnostics.Stopwatch]::StartNew()
+
 # Single instance. Without this, the startup entry plus a manual launch give
 # two clipboard watchers and every copy is spoken twice, over the top of itself.
 $script:Mutex = New-Object System.Threading.Mutex($false, 'Local\SpeakBoxSingleInstance')
-$script:GotMutex = $script:Mutex.WaitOne(0)
+try { $script:GotMutex = $script:Mutex.WaitOne(0) }
+catch [System.Threading.AbandonedMutexException] {
+    # The previous instance was killed (crash, Task Manager) without releasing
+    # the mutex. Windows hands ownership to us along with this exception, so
+    # carry on as the single instance instead of dying at startup.
+    Write-Log 'previous instance ended without closing; taking over'
+    $script:GotMutex = $true
+}
 if (-not $script:GotMutex) {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -TypeDefinition @'
@@ -94,11 +116,18 @@ public class SbExisting {
     return
 }
 
-Write-Log "start (pwsh $($PSVersionTable.PSVersion))"
+Write-Log "start (pwsh $($PSVersionTable.PSVersion), script reached $($script:BootLag)s after process start)"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Speech
+
+# Declare DPI awareness explicitly. Left to the default, pwsh's DPI mode depends
+# on how it was launched: from some parents it runs DPI-unaware, so Windows
+# bitmap-stretches the window and everything looks blurry. SystemAware matches
+# the layout code, which scales by the DPI seen at start-up.
+try { [System.Windows.Forms.Application]::SetHighDpiMode([System.Windows.Forms.HighDpiMode]::SystemAware) | Out-Null }
+catch { Write-Log "could not set DPI mode: $($_.Exception.Message)" }
 
 # --- native helpers: WAV player, neural engine process, sentence splitter -------
 Add-Type -TypeDefinition @'
@@ -257,7 +286,14 @@ public static class SbText
 # Stock WinForms controls cannot be themed dark and look dated, so the visible
 # controls are drawn here. Each one keeps a proper accessibility role and name,
 # so screen readers and UI Automation still see a slider / button / list.
-Add-Type -ReferencedAssemblies 'System.Windows.Forms', 'System.Windows.Forms.Primitives', 'System.Drawing', 'System.Drawing.Primitives', 'System.ComponentModel.Primitives', 'System.Drawing.Common', 'System.Collections', 'System.Private.Windows.Core', 'System.Private.Windows.GdiPlus' -TypeDefinition @'
+# .NET 9+ (PowerShell 7.5+) moved some Font/Graphics plumbing into
+# System.Private.Windows.*; they must be referenced there and do not exist on
+# older runtimes, so include them only when they load.
+$script:UiRefs = @('System.Windows.Forms', 'System.Windows.Forms.Primitives', 'System.Drawing', 'System.Drawing.Primitives',
+                   'System.ComponentModel.Primitives', 'System.Drawing.Common', 'System.Collections') +
+                 @('System.Private.Windows.Core', 'System.Private.Windows.GdiPlus' |
+                   Where-Object { try { [void][Reflection.Assembly]::Load($_); $true } catch { $false } })
+Add-Type -ReferencedAssemblies $script:UiRefs -TypeDefinition @'
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -584,6 +620,7 @@ public class SbCombo : ComboBox
                 g.DrawLines(pen, new[] { new PointF(cx - s, cy - s / 2f), new PointF(cx, cy + s / 2f), new PointF(cx + s, cy - s / 2f) });
             }
             g.SmoothingMode = SmoothingMode.None;
+            using (var bg = new Pen(ItemBack)) g.DrawRectangle(bg, 1, 1, r.Width - 3, r.Height - 3);   // native border is 2px
             using (var pen = new Pen(BorderColor)) g.DrawRectangle(pen, 0, 0, r.Width - 1, r.Height - 1);
         }
     }
@@ -1057,11 +1094,13 @@ function Update-TrayState {
 # --- theme -----------------------------------------------------------------------
 # Follows the Windows app theme (Settings > Personalisation > Colours).
 function ConvertTo-Color([string] $Hex) { [System.Drawing.ColorTranslator]::FromHtml($Hex) }
-$script:Dark = $true
-try {
-    $v = Get-ItemPropertyValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' 'AppsUseLightTheme' -ErrorAction Stop
-    $script:Dark = ($v -eq 0)
-} catch { }
+$script:Dark = $Theme -ne 'light'
+if ($Theme -eq 'auto') {
+    try {
+        $v = Get-ItemPropertyValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' 'AppsUseLightTheme' -ErrorAction Stop
+        $script:Dark = ($v -eq 0)
+    } catch { }
+}
 $t = if ($script:Dark) {
     @{ Bg = '#17171A'; Surface = '#202025'; Surface2 = '#2B2B31'; Border = '#35353D'; Text = '#EDEDF0'; Muted = '#8E8E99'
        Accent = '#8B6CFF'; AccentHover = '#9F86FF'; Hl = '#3B3263'; Track = '#34343C'; Buffer = '#4B4B56'
@@ -1500,6 +1539,7 @@ $script:Tick.Start()
 # The launcher passes SW_HIDE, which .NET would apply to this first window.
 # Force visibility through managed properties (raw ShowWindow kills the process).
 $form.Add_Shown({
+    Write-Log "window shown $([int]$script:BootClock.Elapsed.TotalSeconds)s after script start (dpi $($form.DeviceDpi), scale $([Math]::Round($script:Sc, 2)), size $($form.Width)x$($form.Height))"
     try {
         [SbUi]::StyleWindow($form.Handle, $script:Dark, $script:Th.Bg, $script:Th.Text)
         [SbUi]::ThemeScrollbars($box.Handle, $script:Dark)

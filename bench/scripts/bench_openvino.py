@@ -2,8 +2,9 @@ import time, json, wave, sys, statistics
 from pathlib import Path
 import numpy as np
 
-MODELS = Path(r"C:/Dev/tools/tts/bench/models/ov-whisper-base-int8")
-SAMPLE = Path(r"C:/Dev/tools/tts/bench/out/stt_sample_16k.wav")
+BENCH = Path(__file__).resolve().parents[1]  # the bench/ folder, wherever the repo is
+MODELS = BENCH / "models/ov-whisper-base-int8"
+SAMPLE = BENCH / "out/stt_sample_16k.wav"
 
 import openvino as ov
 import openvino_genai as ov_genai

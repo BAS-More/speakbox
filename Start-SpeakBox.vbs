@@ -1,5 +1,5 @@
 ' Launches the Speak Box with no console window.
-' Double-click this file, or drop a shortcut to it in shell:startup.
+' Double-click this file. To start at sign-in: pwsh -File tools\install-autostart.ps1
 Option Explicit
 
 Dim shell, fso, here, script, cmd

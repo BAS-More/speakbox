@@ -3,7 +3,8 @@ from pathlib import Path
 import ctranslate2
 import sentencepiece as spm
 
-MDIR = Path(r"C:/Dev/tools/tts/bench/models/opus-mt-en-de-ct2")
+BENCH = Path(__file__).resolve().parents[1]  # the bench/ folder, wherever the repo is
+MDIR = BENCH / "models/opus-mt-en-de-ct2"
 
 # 100 short English sentences
 subjects = ["The team", "My friend", "The company", "A child", "The doctor",

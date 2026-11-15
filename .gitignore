@@ -1,6 +1,9 @@
 # Models and voices are large downloads (GBs) - fetch them, never commit them.
 bench/models/
 bench/.venv/
+.venv/
+models/
+*.part
 voices/
 *.onnx
 *.onnx.json

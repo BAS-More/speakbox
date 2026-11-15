@@ -24,9 +24,19 @@ import wave
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+
+
+def first_existing(*relative):
+    """First path that exists; else the first (standard) one. Same order as SpeakBox.ps1."""
+    paths = [ROOT / r for r in relative]
+    return next((p for p in paths if p.exists()), paths[0])
+
+
 PIPER_DIR = ROOT / "voices" / "piper"
-KOKORO_MODEL = ROOT / "bench" / "models" / "kokoro-v1.0.fp32.onnx"  # fp32: 2x faster than int8 on this CPU
-KOKORO_VOICES = ROOT / "bench" / "models" / "voices-v1.0.bin"
+# fp32, not int8: the int8 model measured ~2x SLOWER on CPU (quantize/dequantize overhead).
+KOKORO_MODEL = first_existing("models/kokoro-v1.0.onnx", "models/kokoro-v1.0.fp32.onnx",
+                              "bench/models/kokoro-v1.0.fp32.onnx")
+KOKORO_VOICES = first_existing("models/voices-v1.0.bin", "bench/models/voices-v1.0.bin")
 LOG = ROOT / "speakbox-engine.log"
 
 KOKORO_NAMES = {

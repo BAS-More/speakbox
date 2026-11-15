@@ -174,7 +174,7 @@ if ($null -ne $oldClip) { Set-Clipboard $oldClip }
 
 # --- single instance -------------------------------------------------------------------------
 Start-Process wscript.exe ('"{0}"' -f (Join-Path $Root 'Start-SpeakBox.vbs')); Start-Sleep 5
-$n = @(Get-CimInstance Win32_Process -Filter "Name='pwsh.exe'" | Where-Object { $_.CommandLine -match 'tts\\SpeakBox\.ps1' }).Count
+$n = @(Get-CimInstance Win32_Process -Filter "Name='pwsh.exe'" | Where-Object { $_.CommandLine -match [regex]::Escape((Join-Path $Root 'SpeakBox.ps1')) }).Count
 Check 'second launch does not start a second copy' ($n -eq 1) ("instances $n")
 
 # --- restore voice, check log ------------------------------------------------------------------

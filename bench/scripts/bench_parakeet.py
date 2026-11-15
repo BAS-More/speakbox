@@ -3,8 +3,9 @@ from pathlib import Path
 import numpy as np
 import sherpa_onnx
 
-BUNDLE = Path(r"C:/Dev/tools/tts/bench/models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8")
-SAMPLE = Path(r"C:/Dev/tools/tts/bench/out/stt_sample_16k.wav")
+BENCH = Path(__file__).resolve().parents[1]  # the bench/ folder, wherever the repo is
+BUNDLE = BENCH / "models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+SAMPLE = BENCH / "out/stt_sample_16k.wav"
 NUM_THREADS = 8
 
 with wave.open(str(SAMPLE), "rb") as w:

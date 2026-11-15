@@ -1,6 +1,7 @@
 from huggingface_hub import snapshot_download
 from pathlib import Path
-dest = Path(r"C:/Dev/tools/tts/bench/models/ov-whisper-base-int8")
+BENCH = Path(__file__).resolve().parents[1]  # the bench/ folder, wherever the repo is
+dest = BENCH / "models/ov-whisper-base-int8"
 p = snapshot_download(repo_id="OpenVINO/whisper-base-int8-ov", local_dir=str(dest))
 print("downloaded to", p)
 import os

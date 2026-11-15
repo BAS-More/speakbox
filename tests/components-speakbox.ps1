@@ -32,7 +32,7 @@ Check 'empty split' ([SbText]::Split('  ...  ', 220).Length -eq 0)
 
 # Engine round trip + timing
 $e = New-Object SbEngine
-Check 'engine start' ($e.Start((Join-Path $Root 'bench\.venv\Scripts\python.exe'), (Join-Path $Root 'speakbox_engine.py')))
+Check 'engine start' ($e.Start((@((Join-Path $Root '.venv\Scripts\python.exe'), (Join-Path $Root 'bench\.venv\Scripts\python.exe')) | Where-Object { Test-Path $_ } | Select-Object -First 1), (Join-Path $Root 'speakbox_engine.py')))
 $tmp = Join-Path $env:TEMP 'SpeakBoxTest'; New-Item -ItemType Directory -Force $tmp | Out-Null
 $e.Send((@{cmd='flush';gen=2} | ConvertTo-Json -Compress)) | Out-Null; Start-Sleep -Milliseconds 200; $sw = [Diagnostics.Stopwatch]::StartNew()
 $e.Send((@{cmd='synth';id=1;gen=2;engine='piper';voice='en_GB-alan-medium';text='This is the first sentence from Alan.';speed=1.0;out="$tmp\1.wav"} | ConvertTo-Json -Compress)) | Out-Null
