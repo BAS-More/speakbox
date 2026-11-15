@@ -1,0 +1,145 @@
+{
+  "machine": {
+    "cpu": "Intel Core Ultra 7 268V (Lunar Lake), 8C/8T",
+    "igpu": "Intel Arc 140V (Xe2, 16GB shared)",
+    "npu": "Intel AI Boost NPU (Lunar Lake)",
+    "ram_gb": 32,
+    "os": "Windows 11 Pro",
+    "python": "3.13.9"
+  },
+  "stt_sample": {
+    "source": "synthesized from STT_TEXT via Piper en_US-lessac-medium",
+    "path": "out/stt_sample.wav",
+    "duration_s": 29.08
+  },
+  "legs": [
+    {
+      "leg": 1,
+      "engine": "Piper",
+      "model": "en_US-lessac-medium",
+      "task": "TTS",
+      "device": "CPU",
+      "model_size_mb": 63.2,
+      "compile_ms": 3528.0,
+      "threads": "onnxruntime default (intra-op ~ physical cores)",
+      "results_by_length": {
+        "short_62char":  {"rtf": 0.1784, "first_audio_ms": 622.8, "audio_dur_s": 3.5},
+        "medium_500char": {"rtf": 0.1045, "first_audio_ms": 1039.5, "audio_dur_s": 23.78},
+        "long_2000char": {"rtf": 0.1017, "first_audio_ms": 519.1, "audio_dur_s": 108.6}
+      },
+      "status": "ok",
+      "error": null,
+      "notes": "piper-tts 1.7.0, new PiperVoice API. espeak-ng data bundled in wheel; no external espeak needed. RTF well under 1 (6-10x faster than realtime). Streams sentence-by-sentence so first-audio is one-sentence latency. WAVs: out/piper_short.wav, piper_medium.wav, piper_long.wav.",
+      "sources_installed": ["piper-tts==1.7.0", "onnxruntime==1.29.0", "numpy==2.5.2"]
+    },
+    {
+      "leg": 2,
+      "engine": "Kokoro-82M",
+      "model": "kokoro-v1.0 int8 (onnx), voice af_sarah",
+      "task": "TTS",
+      "device": "CPU",
+      "model_size_mb": 92.4,
+      "compile_ms": 1934.3,
+      "threads": "onnxruntime default",
+      "results_by_length": {
+        "short_62char":  {"rtf": 1.735, "first_audio_ms": 5955.1, "audio_dur_s": 3.54},
+        "medium_500char": {"rtf": 1.3744, "first_audio_ms": 32528.8, "audio_dur_s": 25.66},
+        "long_2000char": {"rtf": 1.6398, "first_audio_ms": 54435.3, "audio_dur_s": 112.87}
+      },
+      "status": "ok",
+      "error": null,
+      "notes": "kokoro-onnx 0.6.1. G2P worked out-of-the-box: espeakng-loader bundles the espeak-ng binary + phonemizer 3.4.0, no separate espeak install needed. RTF > 1 (SLOWER than real-time) on this CPU with the int8 ONNX. CAVEAT: int8 Kokoro ONNX is widely reported slower than fp32 on CPU due to dynamic quantize/dequantize (QDQ) overhead without matching int8 kernels; fp32 comparison pending. first_audio measured via create_stream (async) and is very high because each streamed chunk is a full clause and int8 inference is slow. sample_rate 24000. WAVs: out/kokoro_short.wav, kokoro_medium.wav, kokoro_long.wav.",
+      "sources_installed": ["kokoro-onnx==0.6.1", "espeakng-loader==0.2.4", "phonemizer==3.4.0", "soundfile==0.14.0"]
+    },
+    {
+      "leg": "2b",
+      "engine": "Kokoro-82M",
+      "model": "kokoro-v1.0 fp32 (onnx), voice af_sarah",
+      "task": "TTS",
+      "device": "CPU",
+      "model_size_mb": 325.5,
+      "compile_ms": 1937.7,
+      "threads": "onnxruntime default",
+      "results_by_length": {
+        "short_62char":  {"rtf": 0.8673, "audio_dur_s": 3.54},
+        "medium_500char": {"rtf": 0.5881, "audio_dur_s": 25.71}
+      },
+      "status": "ok",
+      "error": null,
+      "notes": "fp32 re-test confirming the int8 QDQ-overhead hypothesis: fp32 is ~2x FASTER than int8 on this CPU (short 0.87 vs 1.74; medium 0.59 vs 1.37). fp32 is real-time-capable (RTF<1) for medium/long but short is borderline (0.87) and it is still ~5-8x slower than Piper. Takeaway: for Kokoro on CPU use fp32, not int8. Model 325MB vs 92MB. long not re-run (bounded). WAVs: out/kokoro_fp32_short.wav, kokoro_fp32_medium.wav.",
+      "sources_installed": ["kokoro-onnx==0.6.1 (fp32 model)"]
+    },
+    {
+      "leg": 3,
+      "engine": "faster-whisper (CTranslate2)",
+      "model": "small INT8 + large-v3-turbo INT8",
+      "task": "STT",
+      "device": "CPU",
+      "sample_dur_s": 29.08,
+      "beam_size": 5,
+      "results_by_model": {
+        "small_int8":         {"rtf": 0.9418, "load_ms": 18029.7, "wer": "~0 (transcript matches ground truth)"},
+        "large-v3-turbo_int8": {"rtf": 1.1344, "load_ms": 58126.3, "wer": "~0 (transcript matches ground truth)"}
+      },
+      "status": "ok",
+      "error": null,
+      "notes": "faster-whisper 1.2.1 / ctranslate2 4.8.2 (CPU-only, as expected - no CUDA). beam_size=5. Transcription quality essentially perfect on the clean synthesized sample. RTF ~0.94 (small) and ~1.13 (turbo) MEASURED UNDER HEAVY BACKGROUND CPU LOAD (box CPU ~97%, many node/MCP processes running); per-run variance was large (small: 0.81->1.05 across identical runs), so these are CONSERVATIVE. A dedicated run and/or greedy decoding (beam_size=1) would be materially faster. load_ms includes first-run model download+init. models cached in models/fw.",
+      "sources_installed": ["faster-whisper==1.2.1", "ctranslate2==4.8.2", "av==18.1.0", "huggingface-hub==1.29.0"]
+    },
+    {
+      "leg": 4,
+      "engine": "sherpa-onnx Parakeet",
+      "model": "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+      "task": "STT",
+      "device": "CPU",
+      "model_size_mb": 670.4,
+      "compile_ms": 3817.5,
+      "threads": 8,
+      "sample_dur_s": 29.08,
+      "rtf": 0.1704,
+      "status": "ok",
+      "error": null,
+      "notes": "sherpa-onnx 1.x, OfflineRecognizer.from_transducer(model_type='nemo_transducer', greedy_search). RTF 0.17 = ~5-6x faster than real-time on CPU, EVEN under the same heavy background load that slowed faster-whisper. Transcript essentially perfect. This is the standout CPU STT result: real-time STT on CPU with NO NPU/GPU needed. Fed 16kHz mono (resampled from the 22.05kHz Piper sample via ffmpeg). Bundle 487MB compressed / ~670MB on disk (encoder.int8 652MB dominates).",
+      "sources_installed": ["sherpa-onnx (pip)", "numpy"]
+    },
+    {
+      "leg": 5,
+      "engine": "openvino-genai WhisperPipeline",
+      "model": "OpenVINO/whisper-base-int8-ov",
+      "task": "STT",
+      "openvino_version": "2026.3.1",
+      "sample_dur_s": 29.08,
+      "device_verification": "core.available_devices=['CPU','GPU','NPU']; names: CPU='Intel Core Ultra 7 268V', GPU='Intel Arc 140V GPU (16GB) iGPU', NPU='Intel AI Boost'. WhisperPipeline(device) compiles per-device and throws on failure - it did not; all three produced identical, correct transcripts, confirming genuine on-device execution (no silent CPU fallback).",
+      "results_by_device": {
+        "CPU": {"compile_ms": 1393.8, "rtf": 0.0726, "status": "ok", "error": null},
+        "GPU": {"compile_ms": 18146.7, "rtf": 0.0236, "status": "ok", "error": null},
+        "NPU": {"compile_ms": 26486.4, "rtf": 0.0191, "status": "ok", "error": null}
+      },
+      "status": "ok",
+      "error": null,
+      "notes": "THE FINICKY LEG WORKED CLEANLY on all 3 devices - no driver/ABI/static-shape errors. Per-inference speed: NPU fastest (RTF 0.019, ~52x realtime), GPU next (0.024, ~42x), CPU (0.073, ~14x). BUT one-time compile cost is the catch: NPU 26.5s, GPU 18.1s, CPU 1.4s. For a 29s clip: CPU 2.1s vs NPU 0.55s inference - the accelerators save ~1.5s/clip but only pay off if the pipeline stays resident (compile amortized). whisper-base is a smaller model than the faster-whisper small/turbo tested in Leg 3, so cross-leg RTF is not apples-to-apples; within this leg the device comparison is clean (same model, back-to-back). Downloaded pre-converted IR (no torch export needed).",
+      "sources_installed": ["openvino==2026.3.1", "openvino-genai", "openvino-tokenizers", "huggingface-hub"]
+    },
+    {
+      "leg": 6,
+      "engine": "OPUS-MT via CTranslate2",
+      "model": "gaudi/opus-mt-en-de-ctranslate2 (en->de, ~148MB)",
+      "task": "MT",
+      "device": "CPU",
+      "model_size_mb": 148.4,
+      "load_ms": 577.7,
+      "threads": 4,
+      "beam_size": 1,
+      "n_sentences": 100,
+      "median_ms_per_sentence": 95.35,
+      "mean_ms_per_sentence": 97.55,
+      "p90_ms_per_sentence": 123.45,
+      "throughput_sent_per_s": 10.2,
+      "sample": "EN: The team finished the project yesterday. -> DE: Das Team hat das Projekt gestern beendet.",
+      "status": "ok",
+      "error": null,
+      "notes": "Pre-converted CT2 model, NO torch installed (ctranslate2 already present from faster-whisper; only sentencepiece added). Two pitfalls resolved: (1) MarianMT requires '</s>' APPENDED to the source token list - without it the decoder never emits EOS and degenerates into repetitive garbage while decoding to the 256-token max (~6s/sentence); appending '</s>' fixed correctness AND cut latency to ~95ms. (2) Windows cp1252 stdout raised UnicodeEncodeError on the sentencepiece marker char and on German umlauts - run with PYTHONUTF8=1. Latency is single-sentence (batch=1); batched throughput would be far higher. 95ms/sentence single-threaded-ish (4 threads) is easily fast enough for live per-sentence translation.",
+      "sources_installed": ["ctranslate2==4.8.2 (already installed)", "sentencepiece"]
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+# Models and voices are large downloads (GBs) - fetch them, never commit them.
+bench/models/
+bench/.venv/
+voices/
+*.onnx
+*.onnx.json
+*.bin
+
+# Generated audio and runtime files
+bench/out/
+output/
+*.wav
+*.aac
+*.log
+speakbox.state.json
+*.bak-*
+__pycache__/
+*.pyc
