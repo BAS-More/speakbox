@@ -264,8 +264,11 @@ These files, the models and the Python environment are all in `.gitignore`.
 **A Piper voice is missing.** It needs both `voices\piper\<id>.onnx` and `voices\piper\<id>.onnx.json`. `setup.ps1 -Voices <id>` fetches both.
 
 **A neural voice is selected but nothing plays.**
-1. Look in `speakbox-engine.log`.
-2. Check that the environment imports cleanly: `.\.venv\Scripts\python.exe -c "import piper, kokoro_onnx, numpy"`. If not, run `setup.ps1` again.
+1. Look in `speakbox.log` for `neural engine exited unexpectedly`. The line ends with the engine's exit code and error output.
+2. Look in `speakbox-engine.log`.
+3. Check that the environment imports cleanly: `.\.venv\Scripts\python.exe -c "import piper, kokoro_onnx, numpy"`. If not, run `setup.ps1` again.
+
+**Neural voices work when started from one app but not at sign-in.** If the log says `did not find executable at '...\AppData\Roaming\uv\python\...'`, `.venv` was built inside an MSIX-packaged app. Such apps get a private copy of `AppData`, so the Python that `.venv` points at does not exist for anything else. Delete `.venv`, install Python 3.13 from python.org, and run `setup.ps1` from a normal terminal. See gotcha 10.
 
 **No sound from any voice.** Playback needs a working default audio output device. The component tests check MCI open, play and position on their own, and show which step fails.
 
@@ -290,6 +293,7 @@ Each of these cost real debugging time.
 7. **Declare DPI awareness explicitly.** Left to the default, `pwsh.exe` runs DPI-unaware when launched from some parents, and Windows bitmap-stretches the window (blurry, wrong size).
 8. **Start at sign-in with a scheduled task at normal priority.** Run-key entries start one at a time, so a hung app earlier in the list blocks the rest. Task Scheduler's default priority (7) runs the app *below normal* for its whole life, so `install-autostart.ps1` sets priority 4.
 9. **A killed copy leaves an abandoned mutex.** The next start would die on `AbandonedMutexException`. SpeakBox treats that exception as "you now own the mutex" and carries on.
+10. **Packaged apps virtualize `AppData`.** A terminal inside an MSIX-packaged app (some AI desktop apps are packaged) writes `AppData` to a private copy. A Python that uv installs there is visible only inside that app. A `.venv` built on it works while you test from that app, then fails at sign-in with exit code 103. `setup.ps1` prefers a python.org install (`--python-preference system`) and warns when the `.venv`'s Python has a packaged copy. SpeakBox checks the `.venv`'s Python before starting the engine and says in the window when it is missing.
 
 ---
 

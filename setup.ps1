@@ -89,8 +89,11 @@ if (-not $NoPython) {
     $req = Join-Path $Root 'requirements.txt'
     $uv = Get-Command uv -ErrorAction SilentlyContinue
     if ($uv) {
-        if (-not (Test-Path $venvPy)) { & $uv.Source venv (Join-Path $Root '.venv') --python 3.13 --quiet; if ($LASTEXITCODE) { throw 'uv venv failed' } }
-        & $uv.Source pip install --python $venvPy -r $req --quiet
+        # Prefer a python.org / py-launcher install over a uv-managed one: when this runs
+        # inside an MSIX-packaged app (some AI desktop apps), uv's AppData is virtualized
+        # and the .venv would point at a Python that SpeakBox cannot see at sign-in.
+        if (-not (Test-Path $venvPy)) { & $uv.Source venv (Join-Path $Root '.venv') --python 3.13 --python-preference system --quiet; if ($LASTEXITCODE) { throw 'uv venv failed' } }
+        & $uv.Source pip install --python $venvPy -r $req --link-mode copy --quiet
         if ($LASTEXITCODE) { throw 'uv pip install failed' }
     }
     else {
@@ -106,6 +109,24 @@ if (-not $NoPython) {
         }
         & $venvPy -m pip install --quiet --disable-pip-version-check -r $req
         if ($LASTEXITCODE) { throw 'pip install failed' }
+    }
+    # Warn about a .venv whose base Python may live only in a packaged app's private
+    # AppData copy. Only a warning: from inside a packaged app the real and private
+    # copies look the same, so a matching private copy does not prove the real one is gone.
+    $venvHome = ((Get-Content (Join-Path $Root '.venv\pyvenv.cfg') | Where-Object { $_ -match '^\s*home\s*=' } | Select-Object -First 1) -replace '^\s*home\s*=\s*', '').Trim()
+    foreach ($base in @($env:APPDATA, $env:LOCALAPPDATA)) {
+        if ($venvHome -and $base -and $venvHome.StartsWith($base, [StringComparison]::OrdinalIgnoreCase)) {
+            $rel = $venvHome.Substring($base.Length).TrimStart('\')
+            $kind = if ($base -eq $env:APPDATA) { 'Roaming' } else { 'Local' }
+            $hidden = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Packages') -Directory -ErrorAction SilentlyContinue |
+                Where-Object { Test-Path (Join-Path $_.FullName "LocalCache\$kind\$rel\python.exe") } | Select-Object -First 1
+            if ($hidden) {
+                Write-Warning (".venv uses $venvHome, and a private copy of it exists inside the packaged app '$($hidden.Name)'. " +
+                    'If that private copy is the only one, neural voices will fail when SpeakBox starts at sign-in ' +
+                    '(speakbox.log: "did not find executable", exit code 103). To be safe: delete .venv, install Python 3.13 ' +
+                    'from python.org, and run setup.ps1 again from a normal terminal.')
+            }
+        }
     }
     $ver = & $venvPy -c "import sys, piper, kokoro_onnx; print('Python', sys.version.split()[0])"
     if ($LASTEXITCODE) { throw 'The Python packages did not import correctly.' }
