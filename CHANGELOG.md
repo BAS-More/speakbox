@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Neural voices failed when SpeakBox started at sign-in if `.venv` was built inside an MSIX-packaged app,
+  whose `AppData` is private to that app. `setup.ps1` now prefers a python.org Python and warns about such a `.venv`.
+- A broken neural engine no longer restarts for every sentence: SpeakBox checks the `.venv`'s Python first, pauses
+  restarts for 30 s after 3 failures in a row, and says why in the window instead of "Done".
+- `speakbox.log` records the engine's exit code and last error lines when it exits, once per distinct failure.
+
+### Added
+- `tests/failure-paths-speakbox.ps1`: live test that breaks the engine on purpose and checks the handling.
+
 ## 1.0.0 - 2026-11-16
 
 First public release.

@@ -83,6 +83,14 @@ catch [System.Threading.AbandonedMutexException] {
     $script:GotMutex = $true
 }
 if (-not $script:GotMutex) {
+    # Ask the running instance to show itself from its own process. Done first: it
+    # is instant, while compiling the helper below can take many seconds on a busy PC.
+    try {
+        $evt = [System.Threading.EventWaitHandle]::OpenExisting('Local\SpeakBoxShowWindow')
+        $evt.Set() | Out-Null
+        $evt.Dispose()
+    }
+    catch { Write-Verbose "show signal unavailable: $($_.Exception.Message)" }
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -TypeDefinition @'
 using System;
@@ -105,13 +113,7 @@ public class SbExisting {
     }
 }
 '@
-    # Ask the running instance to show itself from its own process.
-    try {
-        $evt = [System.Threading.EventWaitHandle]::OpenExisting('Local\SpeakBoxShowWindow')
-        $evt.Set() | Out-Null
-        $evt.Dispose()
-    }
-    catch { Write-Verbose "show signal unavailable: $($_.Exception.Message)" }
+    # A launched process may set the foreground window; the running one may not.
     try { [SbExisting]::Surface() } catch { Write-Verbose 'surface failed' }
     return
 }
@@ -196,7 +198,28 @@ public class SbEngine
 {
     private Process _p;
     private readonly ConcurrentQueue<string> _lines = new ConcurrentQueue<string>();
+    private readonly ConcurrentQueue<string> _err = new ConcurrentQueue<string>();
+    private volatile bool _outEof, _errEof;
     public string LastError = "";
+
+    // HasExited turns true before the async readers have delivered the last lines.
+    // Wait (bounded: a grandchild python can hold the pipes open) for both to hit EOF.
+    public void WaitDrained(int ms)
+    {
+        var sw = Stopwatch.StartNew();
+        while (!(_outEof && _errEof) && sw.ElapsedMilliseconds < ms) System.Threading.Thread.Sleep(10);
+    }
+
+    // Exit code plus the last stderr lines, for the log when the engine dies.
+    public string ExitInfo
+    {
+        get
+        {
+            string code = "?";
+            try { if (_p != null && _p.HasExited) code = _p.ExitCode.ToString(); } catch { }
+            return "exit code " + code + "; stderr: " + string.Join(" | ", _err.ToArray());
+        }
+    }
 
     public bool Alive { get { try { return _p != null && !_p.HasExited; } catch { return false; } } }
 
@@ -215,8 +238,15 @@ public class SbEngine
             si.StandardErrorEncoding = new UTF8Encoding(false);
             _p = new Process();
             _p.StartInfo = si;
-            _p.OutputDataReceived += (s, e) => { if (e.Data != null) _lines.Enqueue(e.Data); };
-            _p.ErrorDataReceived += (s, e) => { };  // drained so the pipe never fills and blocks python
+            _p.OutputDataReceived += (s, e) => { if (e.Data != null) _lines.Enqueue(e.Data); else _outEof = true; };
+            // Drained so the pipe never fills and blocks python; the tail is kept for the log.
+            _p.ErrorDataReceived += (s, e) =>
+            {
+                if (e.Data == null) { _errEof = true; return; }
+                if (string.IsNullOrWhiteSpace(e.Data)) return;
+                _err.Enqueue(e.Data.Length > 300 ? e.Data.Substring(0, 300) : e.Data);
+                string drop; while (_err.Count > 12) _err.TryDequeue(out drop);
+            };
             _p.Start();
             _p.BeginOutputReadLine();
             _p.BeginErrorReadLine();
@@ -774,21 +804,83 @@ function Get-SpeedFactor {
 }
 
 # --- neural engine --------------------------------------------------------------------
-$script:Engine = $null
+$script:Engine        = $null
+$script:EngineStarted = [DateTime]::MinValue  # UTC time of the last start
+$script:FastFails     = 0                     # engine deaths within 5 s of starting, in a row
+$script:EngineBlocked = [DateTime]::MinValue  # no restarts before this UTC time
+$script:EngineNote    = ''                    # last problem told to the user; logged once
+$script:EngineAnswered = $false               # current engine has replied ok at least once
+$script:PauseLoggedFor = [DateTime]::MinValue # back-off window already logged
+
+# A venv's python.exe is a small launcher that runs <home>\python.exe from pyvenv.cfg.
+# When that base Python is gone (or was only ever visible inside a packaged app's
+# private AppData), the launcher exits with code 103 before our script runs.
+function Get-PythonProblem {
+    if (-not (Test-Path -LiteralPath $script:Python)) { return "Python not found ($script:Python). Run setup.ps1." }
+    $cfg = Join-Path (Split-Path (Split-Path $script:Python)) 'pyvenv.cfg'
+    if (-not (Test-Path -LiteralPath $cfg)) { return '' }
+    $line = Get-Content -LiteralPath $cfg -ErrorAction SilentlyContinue | Where-Object { $_ -match '^\s*home\s*=' } | Select-Object -First 1
+    if (-not $line) { return '' }
+    $base = ($line -replace '^\s*home\s*=\s*', '').Trim()
+    if ($base -and -not (Test-Path -LiteralPath (Join-Path $base 'python.exe'))) {
+        return "the Python this environment needs is missing ($base). Run setup.ps1 again."
+    }
+    return ''
+}
+
+# Short, human reason for the status line; the full detail goes to the log.
+function Get-EngineReason([string] $Info) {
+    if ($Info -match 'did not find executable|exit code 103') { return 'the Python it needs is missing - run setup.ps1' }
+    if ($Info -match 'ModuleNotFoundError|No module named') { return 'Python packages are missing - run setup.ps1' }
+    return 'see speakbox.log'
+}
+
+function Set-EngineNote([string] $Note, [string] $LogLine) {
+    $lblStatus.Text = "neural voices unavailable: $Note"
+    if ($script:EngineNote -ne $LogLine) { Write-Log $LogLine; $script:EngineNote = $LogLine }
+}
 
 function Initialize-Engine {
     if ($script:Engine -and $script:Engine.Alive) { return $true }
-    if ($script:Engine) { $script:Engine.Stop() }
+    # Found dead here before Receive-Engine saw it: record it like any other death.
+    if ($script:Engine) { $script:Engine.WaitDrained(500); Register-EngineDeath }
     # Requests sent to the old process will never be answered.
     $script:Pending.Clear(); $script:IdToKey.Clear()
+    if ([DateTime]::UtcNow -lt $script:EngineBlocked) {
+        $lblStatus.Text = 'neural voices unavailable: engine keeps failing - retrying shortly'
+        if ($script:PauseLoggedFor -ne $script:EngineBlocked) {
+            Write-Log 'neural engine restart paused for 30 s after repeated failures'
+            $script:PauseLoggedFor = $script:EngineBlocked
+        }
+        return $false
+    }
+    $problem = Get-PythonProblem
+    if ($problem) { Set-EngineNote $problem "neural engine not started: $problem"; return $false }
     $script:Engine = New-Object SbEngine
     if (-not $script:Engine.Start($script:Python, $script:EngineScript)) {
-        Write-Log "engine start failed: $($script:Engine.LastError)"
+        Set-EngineNote 'engine could not start - see speakbox.log' "engine start failed: $($script:Engine.LastError)"
         $script:Engine = $null
         return $false
     }
+    $script:EngineStarted = [DateTime]::UtcNow
+    $script:EngineAnswered = $false
     Write-Log 'neural engine started'
     return $true
+}
+
+# Called when the engine process is found dead. Fails outstanding work so playback
+# moves on, and backs off after repeated early deaths instead of respawning per sentence.
+# "Early" = before it ever produced audio, so a crash while loading a model counts too.
+function Register-EngineDeath {
+    $info = $script:Engine.ExitInfo
+    $early = -not $script:EngineAnswered
+    $script:FastFails = if ($early) { $script:FastFails + 1 } else { 0 }
+    if ($script:FastFails -ge 3) { $script:EngineBlocked = [DateTime]::UtcNow.AddSeconds(30); $script:FastFails = 0 }
+    foreach ($k in @($script:Pending.Keys)) { $script:Failed[$k] = 'engine exited' }
+    $script:Pending.Clear(); $script:IdToKey.Clear()
+    try { $script:Engine.Stop() } catch { }
+    $script:Engine = $null
+    Set-EngineNote (Get-EngineReason $info) "neural engine exited unexpectedly ($info)"
 }
 
 # --- reader state ---------------------------------------------------------------------
@@ -842,7 +934,6 @@ function Request-Chunk([int] $i) {
 
     if (-not (Initialize-Engine)) {
         $script:Failed[$key] = 'neural engine unavailable'
-        $lblStatus.Text = 'neural engine could not start - see speakbox.log'
         return
     }
     $req = [ordered]@{
@@ -861,10 +952,14 @@ function Request-Chunk([int] $i) {
 
 function Receive-Engine {
     if (-not $script:Engine) { return }
+    # Checked first: once it has exited, wait for its last lines before draining them.
+    $dead = -not $script:Engine.Alive
+    if ($dead) { $script:Engine.WaitDrained(500) }
     $line = $null
     while ($script:Engine.TryRead([ref]$line)) {
         try { $msg = $line | ConvertFrom-Json } catch { continue }
         $p = $msg.PSObject.Properties
+        if ($p['ok'] -and $msg.ok) { $script:EngineAnswered = $true }
         if (-not $p['id'] -or $null -eq $msg.id) { continue }
         $id = [int]$msg.id
         if (-not $script:IdToKey.ContainsKey($id)) { continue }
@@ -877,13 +972,11 @@ function Receive-Engine {
             Write-Log "synth failed: $($msg.error)"
         }
     }
-    # Engine died with work outstanding: fail it so playback moves on.
-    if ($script:Pending.Count -and -not $script:Engine.Alive) {
-        Write-Log 'neural engine exited unexpectedly'
-        foreach ($k in @($script:Pending.Keys)) { $script:Failed[$k] = 'engine exited' }
-        $script:Pending.Clear(); $script:IdToKey.Clear()
-        $lblStatus.Text = 'neural engine stopped - see speakbox.log'
-    }
+    # Engine died (with or without work outstanding).
+    if ($dead) { Register-EngineDeath; return }
+    # An engine that has produced audio is healthy: clear the failure count and the
+    # "logged once" note, so a later failure is counted and logged afresh.
+    if ($script:EngineAnswered) { $script:FastFails = 0; $script:EngineNote = '' }
 }
 
 function Clear-Highlight {
@@ -1033,6 +1126,7 @@ function Invoke-Tick {
     if (-not $script:Started) {
         $key = Get-Key (Get-ChunkText $p.Index)
         if ($script:Failed.ContainsKey($key)) {
+            $p['Skipped'] = [int]$p['Skipped'] + 1
             $p.Index++; $p.Frac = 0
         }
         elseif ($script:Cache.ContainsKey($key)) {
@@ -1041,6 +1135,7 @@ function Invoke-Tick {
                 if ($script:Player.Play($from)) {
                     $script:Started = $true
                     $p.Frac = 0
+                    $p['Played'] = [int]$p['Played'] + 1
                     $lblStatus.Text = 'Speaking'
                     Set-Highlight $p.Chunks[2 * $p.Index] $p.Chunks[2 * $p.Index + 1]
                 }
@@ -1067,7 +1162,12 @@ function Invoke-Tick {
     if ($p.Index -ge $p.Count) {
         Stop-Audio
         Set-SeekValue 1000
-        $lblStatus.Text = 'Done'
+        # Sentences failed: say so instead of a plain "Done".
+        $skipped = [int]$p['Skipped']
+        $lblStatus.Text = if ([int]$p['Played'] -gt 0 -and $skipped -eq 0) { 'Done' }
+                          elseif ([int]$p['Played'] -gt 0) { "Done - $skipped sentence$(if ($skipped -ne 1) { 's' }) skipped, see speakbox.log" }
+                          elseif ($script:Cur.Engine -ne 'windows' -and $lblStatus.Text -like 'neural voices unavailable*') { $lblStatus.Text }
+                          else { 'nothing could be spoken - see speakbox.log' }
         return
     }
     # Read ahead so the next sentence is ready before this one ends.

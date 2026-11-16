@@ -77,10 +77,15 @@ function Select-Voice($pattern) {
     # Find the exact label in the list, then set it through ValuePattern (the
     # standard accessibility way to change a combo box), as a screen reader would.
     $ec = $combo.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
-    $ec.Expand(); Start-Sleep -Milliseconds 300
-    $item = $combo.FindAll($TS::Descendants, (New-Object System.Windows.Automation.PropertyCondition($CTP, $CT::ListItem))) |
-        Where-Object { $_.Current.Name -like $pattern } | Select-Object -First 1
-    $name = if ($item) { $item.Current.Name } else { $null }
+    $name = $null
+    # The drop-down's items can take a moment to appear in UIA: retry, as the voice count does.
+    foreach ($try in 1..5) {
+        $ec.Expand(); Start-Sleep -Milliseconds 300
+        $item = $combo.FindAll($TS::Descendants, (New-Object System.Windows.Automation.PropertyCondition($CTP, $CT::ListItem))) |
+            Where-Object { $_.Current.Name -like $pattern } | Select-Object -First 1
+        if ($item) { $name = $item.Current.Name; break }
+        try { $ec.Collapse() } catch { }; Start-Sleep -Milliseconds 200
+    }
     try { $ec.Collapse() } catch { }
     if (-not $name) { throw "voice $pattern not in list" }
     $combo.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($name)
@@ -173,8 +178,12 @@ if (-not $wasOn) { $tg.Toggle() }
 if ($null -ne $oldClip) { Set-Clipboard $oldClip }
 
 # --- single instance -------------------------------------------------------------------------
-Start-Process wscript.exe ('"{0}"' -f (Join-Path $Root 'Start-SpeakBox.vbs')); Start-Sleep 5
-$n = @(Get-CimInstance Win32_Process -Filter "Name='pwsh.exe'" | Where-Object { $_.CommandLine -match [regex]::Escape((Join-Path $Root 'SpeakBox.ps1')) }).Count
+Start-Process wscript.exe ('"{0}"' -f (Join-Path $Root 'Start-SpeakBox.vbs')); Start-Sleep 3
+# The second pwsh needs time to load before it finds the running copy and exits
+# (over 30 s when the CPU is saturated), so wait for the count to settle instead of a fixed sleep.
+function Count-Instances { @(Get-CimInstance Win32_Process -Filter "Name='pwsh.exe'" | Where-Object { $_.CommandLine -match [regex]::Escape((Join-Path $Root 'SpeakBox.ps1')) }).Count }
+WaitFor 'single instance' { (Count-Instances) -le 1 } 60 | Out-Null
+$n = Count-Instances
 Check 'second launch does not start a second copy' ($n -eq 1) ("instances $n")
 
 # --- restore voice, check log ------------------------------------------------------------------
